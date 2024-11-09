@@ -1,0 +1,276 @@
+#include <Keypad.h>
+#include <Adafruit_PCD8544.h>
+
+const byte ROWS = 4;
+const byte COLS = 4;
+char keys[ROWS][COLS] = {
+  {'1', '2', '3', 'A'},
+  {'4', '5', '6', 'B'},
+  {'7', '8', '9', 'C'},
+  {'*', '0', '#', 'D'}
+};
+
+byte rowPins[ROWS] = {4, 5, 6, 7};
+byte colPins[COLS] = {A4, A3, A2, A1};
+
+// Creación del objeto keypad
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+// Creación de un objeto de la pantalla Nokia 5110
+Adafruit_PCD8544 display = Adafruit_PCD8544(13, 12, 11, 9, 8);
+
+bool finalized = false;
+bool depositoRealizado = false;
+int tiempoON = 0;
+volatile int contador = 0;
+
+int pote = A0;
+int motor = 10;
+int setPoint = 0;
+int rpm = 0;
+
+void inicio() {
+  centrarSentencia("ESCUELA ESPECIALIZADA EN INGENIERIA");
+  delay(500);
+  centrarSentencia("  ITCA-FEPADE  ");
+  delay(500);
+  centrarSentencia(" PROYECTO DE GRADUACION");
+  delay(500);
+  centrarSentencia("SPIN COATER VERSION 1.0 ALPHA");
+  delay(500);
+}
+
+int getNumericInput() {
+  int input = 0;
+  int posicion = 8;
+  boolean inputConfirmed = false;
+
+  while (!inputConfirmed) {
+    input = 0;
+    posicion = 8;
+    mostrarFrase("Ingresar valor:", 0, 0);
+    mostrarFrase("[#]: OK ", 0, 2);
+    mostrarFrase("[*]:Borrar y", 0, 3);
+    mostrarFrase("reiniciar", 4, 4);
+    mostrarFrase("Tiempo:", 0, 1);
+    mostrarFrase("s:", 12, 1);
+
+    char key = keypad.getKey();
+    while (key != '#' && key != '*') {
+      key = keypad.getKey();
+      if (key != NO_KEY && isdigit(key)) {
+        input = input * 10 + (key - '0');
+        mostrarFrase(String(key - '0'), posicion, 1);
+        posicion++;
+      }
+    }
+
+    if (key == '*') {
+      display.clearDisplay();
+      centrarSentencia("----- VALOR BORRADO -----");
+      delay(750);
+      display.clearDisplay();
+      continue;
+    }
+    display.clearDisplay();
+    centrarTexto("-AVISO-", 0);
+    mostrarFrase("Dato ingresado: ", 0, 1);
+    mostrarFrase(String(input) + " segundos", 0, 2);
+    mostrarFrase("Es correcto?", 0, 3);
+    delay(2000);
+    display.clearDisplay();
+
+    mostrarFrase("[A]:Aceptar", 0, 0);
+    mostrarFrase("[C]:Cancelar y", 0, 2);
+    mostrarFrase("volver a", 4, 3);
+    mostrarFrase("ingresar", 4, 4);
+
+    while (!inputConfirmed) {
+      key = keypad.getKey();
+      if (key == 'A') {
+        inputConfirmed = true;
+      } else if (key == 'C') {
+        display.clearDisplay();
+        centrarSentencia("----- INGRESO CANCELADO -----");
+        delay(1000);
+        display.clearDisplay();
+        break;
+      }
+    }
+  }
+  return input;
+}
+
+void centrarSentencia(String texto) {
+  display.clearDisplay();
+  int espacios = (84 - texto.length() * 6) / 2;
+  display.setCursor(espacios, 20);
+  display.print(texto);
+  display.display();
+}
+
+void mostrarFrase(String texto, int posicion, int fila) {
+  display.setCursor(posicion * 6, fila * 10);
+  display.print(texto);
+  display.display();
+}
+
+void centrarTexto(String texto, int fila) {
+  int textoWidth = texto.length() * 6;
+  int xPos = (84 - textoWidth) / 2;
+  int yPos = fila * 10;
+  display.setCursor(xPos, yPos);
+  display.println(texto);
+  display.display();
+}
+
+void asignarTiempo() {
+  bool timeConfirmed = false;
+  centrarSentencia("SELECCION DE TIEMPO ENCENDIDO (SEGUNDOS): ");
+  delay(4000);
+  while (!timeConfirmed) {
+    display.clearDisplay();
+    tiempoON = getNumericInput();
+    if (tiempoON >= 10 && tiempoON <= 600) {
+      timeConfirmed = true;
+      centrarSentencia("----- VALOR CONFIRMADO -----");
+      delay(2000);
+      centrarTexto("El valor", 0);
+      centrarTexto("asignado", 1);
+      centrarTexto("fue de: ", 2);
+      centrarTexto(String(tiempoON) + " segundos", 3);
+      delay(1000);
+      display.clearDisplay();
+    } else {
+      timeConfirmed = false;
+      centrarSentencia("----- VALOR INCORRECTO -----");
+      delay(2000);
+      centrarTexto("Ingrese un valor", 0);
+      if (tiempoON > 600) centrarTexto("menor o igual a 600", 2);
+      else centrarTexto("mayor o igual a 10", 2);
+      delay(2000);
+    }
+  }
+}
+
+int setearVel() {
+  boolean velConfirmed = false;
+  int sp;
+  unsigned long previo = 0, actual = 0;
+  centrarSentencia("SELECCION DE VELOCIDAD (RPM): ");
+  delay(2000);
+  while (!velConfirmed) {
+    char key = keypad.getKey();
+    actual = millis();
+    sp = analogRead(pote);
+    sp = map(sp, 0, 1023, 0, 255);
+    analogWrite(motor, sp);
+    interrupts();
+    if (actual - previo >= 1000UL) {
+      noInterrupts();
+      display.clearDisplay();
+      mostrarFrase("Mueva el pote", 0, 0);
+      mostrarFrase("Para setear la velocidad", 0, 1);
+      mostrarFrase("[A]:Aceptar", 0, 4);
+      rpm = contador * 60;
+      mostrarFrase("RPM:" + String(rpm), 0, 3);
+      contador = 0;
+      previo = actual;
+    }
+    if (key == 'A') {
+      velConfirmed = true;
+      centrarSentencia("----- VALOR CONFIRMADO -----");
+      delay(2000);
+    }
+  }
+  return sp;
+}
+
+void interrupcion() {
+  contador++;
+}
+
+void temporizador(int segundos) {
+  if (finalized) return;
+  finalized = true;
+  unsigned long tiempoInicio = millis();
+  int segundosRestantes = segundos;
+  unsigned long tiempoActual;
+  unsigned long tiempoAnterior = tiempoInicio;
+
+  while (segundosRestantes >= 0) {
+    tiempoActual = millis();
+    analogWrite(motor, setPoint);
+    if (tiempoActual - tiempoAnterior >= 1000) {
+      String texto = "Tiempo restante: " + String(segundosRestantes) + "s";
+      centrarSentencia(texto);
+      centrarTexto("RPM:" + String(rpm), 3);
+      centrarTexto("[0]: PARAR", 4);
+      segundosRestantes--;
+      tiempoAnterior = tiempoActual;
+    }
+    char key = keypad.getKey();
+    if (key == '0') {
+      analogWrite(motor, 0);
+      centrarSentencia(" PARADA DE EMERGENCIA");
+      delay(1000);
+      return;
+    }
+  }
+  centrarSentencia("Tiempo terminado");
+}
+
+void setup() {
+  pinMode(pote, INPUT);
+  pinMode(motor, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(2), interrupcion, RISING);
+  display.begin();
+  display.setContrast(127);
+  display.clearDisplay();
+  inicio();
+  asignarTiempo();
+  setPoint = setearVel();
+}
+
+void Deposicion() {
+  char key = keypad.getKey();
+  while (key != '#') {
+    analogWrite(motor, 15);
+    centrarSentencia("Realice la deposicion");
+    centrarTexto("[#]: Comenzar", 4);
+    key = keypad.getKey();
+    if (key == '#') break;
+  }
+}
+
+void loop() {
+  if (!depositoRealizado) {
+    Deposicion();
+    depositoRealizado = true;
+  }
+
+  temporizador(tiempoON);
+
+  if (finalized) {
+    display.clearDisplay();
+    centrarTexto("Desea volver a", 0);
+    centrarTexto("Ingresar el", 1);
+    centrarTexto("Tiempo de ", 2);
+    centrarTexto("encendido?", 3);
+    centrarTexto("[*]:No  [#]:Si", 4);
+
+char key = keypad.getKey();
+
+if (key == '*') {
+    centrarSentencia("----- FIN DE EJECUCION -----");
+    while (1);
+}
+if (key == '#') {
+    finalized = false;
+    depositoRealizado = false;
+    display.clearDisplay();
+    asignarTiempo();
+}
+
+  }
+}
